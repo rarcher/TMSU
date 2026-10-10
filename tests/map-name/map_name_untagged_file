@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+# setup
+
+echo 1 >/tmp/tmsu/file1
+
+# test
+
+tmsu map-name /tmp/tmsu/file1 "Purple vegetable.jpg"        >|/tmp/tmsu/stdout 2>|/tmp/tmsu/stderr
+
+# verify
+
+diff /tmp/tmsu/stderr - <<EOF
+tmsu: /tmp/tmsu/file1: file is not tagged
+EOF
+if [[ $? -ne 0 ]]; then
+    exit 1
+fi
+
+diff /tmp/tmsu/stdout - </dev/null
+if [[ $? -ne 0 ]]; then
+    exit 1
+fi

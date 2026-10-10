@@ -29,6 +29,7 @@ var commands = []*Command{
 	&ImplyCommand,
 	&InfoCommand,
 	&InitCommand,
+	&MapNameCommand,
 	&MergeCommand,
 	&RenameCommand,
 	&RepairCommand,

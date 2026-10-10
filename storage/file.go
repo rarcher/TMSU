@@ -57,6 +57,14 @@ func (store *Storage) FileByPath(tx *Tx, path string) (*entities.File, error) {
 	return file, err
 }
 
+// Retrieves the file with the specified name map.
+func (store *Storage) FileByNameMap(tx *Tx, nameMap string) (*entities.File, error) {
+	file, err := database.FileByNameMap(tx.tx, nameMap)
+	store.absPath(file)
+
+	return file, err
+}
+
 // Retrieves all files that are under the specified directory.
 func (store *Storage) FilesByDirectory(tx *Tx, path string) (entities.Files, error) {
 	relPath := store.relPath(path)
@@ -155,6 +163,20 @@ func (store *Storage) UpdateFile(tx *Tx, fileId entities.FileId, path string, fi
 	store.absPath(file)
 
 	return file, err
+}
+
+// Updates the name map of a file.
+func (store *Storage) UpdateFileNameMap(tx *Tx, fileId entities.FileId, nameMap string) error {
+	if err := entities.ValidateFileNameMap(nameMap); err != nil {
+		return err
+	}
+
+	return database.UpdateFileNameMap(tx.tx, fileId, nameMap)
+}
+
+// Removes the name map of a file.
+func (store *Storage) DeleteFileNameMap(tx *Tx, fileId entities.FileId) error {
+	return database.DeleteFileNameMap(tx.tx, fileId)
 }
 
 // Deletes a file from the database.

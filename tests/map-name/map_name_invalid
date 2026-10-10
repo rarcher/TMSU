@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+# setup
+
+echo 1 >/tmp/tmsu/file1
+tmsu tag /tmp/tmsu/file1 aubergine                          >|/tmp/tmsu/stdout 2>|/tmp/tmsu/stderr
+
+# test
+
+tmsu map-name /tmp/tmsu/file1 "purple/vegetable"            >>/tmp/tmsu/stdout 2>>/tmp/tmsu/stderr
+tmsu map-name /tmp/tmsu/file1 files                         >>/tmp/tmsu/stdout 2>>/tmp/tmsu/stderr
+
+# verify
+
+tmsu map-name /tmp/tmsu/file1                               >>/tmp/tmsu/stdout 2>>/tmp/tmsu/stderr
+
+diff /tmp/tmsu/stderr - <<EOF
+tmsu: new tag 'aubergine'
+tmsu: /tmp/tmsu/file1: could not set name map to 'purple/vegetable': name map cannot contain '/'
+tmsu: /tmp/tmsu/file1: could not set name map to 'files': name map cannot be 'files'
+EOF
+if [[ $? -ne 0 ]]; then
+    exit 1
+fi
+
+diff /tmp/tmsu/stdout - </dev/null
+if [[ $? -ne 0 ]]; then
+    exit 1
+fi

@@ -485,7 +485,14 @@ func (vfs FuseVfs) Unlink(name string, context *fuse.Context) fuse.Status {
 	}
 	defer tx.Commit()
 
-	fileId := vfs.parseFileId(name)
+	path := vfs.splitPath(name)
+
+	var fileId entities.FileId
+	if vfs.isFilesDirEntry(path) {
+		fileId = vfs.linkNameToFileId(tx, path[len(path)-1])
+	} else {
+		fileId = vfs.parseFileId(name)
+	}
 	if fileId == 0 {
 		// can only unlink file symbolic links
 		return fuse.EPERM
@@ -499,7 +506,6 @@ func (vfs FuseVfs) Unlink(name string, context *fuse.Context) fuse.Status {
 		// reply ok if file doesn't exist otherwise recursive deletes fail
 		return fuse.OK
 	}
-	path := vfs.splitPath(name)
 
 	switch path[0] {
 	case tagsDir:
@@ -575,6 +581,22 @@ func (vfs FuseVfs) parseFileId(name string) entities.FileId {
 	}
 
 	return entities.FileId(id)
+}
+
+func (vfs FuseVfs) linkNameToFileId(tx *storage.Tx, name string) entities.FileId {
+	file, err := vfs.store.FileByNameMap(tx, name)
+	if err != nil {
+		log.Fatalf("could not retrieve file with name map '%v': %v", name, err)
+	}
+	if file != nil {
+		return file.Id
+	}
+
+	return vfs.parseFileId(name)
+}
+
+func (vfs FuseVfs) isFilesDirEntry(path []string) bool {
+	return len(path) > 1 && path[len(path)-2] == filesDir
 }
 
 func (vfs FuseVfs) topFiles() ([]fuse.DirEntry, fuse.Status) {
@@ -687,9 +709,20 @@ func (vfs FuseVfs) getTaggedEntryAttr(path []string) (*fuse.Attr, fuse.Status) {
 		return vfs.getFilesAttr(path)
 	}
 
-	fileId := vfs.parseFileId(name)
+	tx, err := vfs.store.Begin()
+	if err != nil {
+		log.Fatalf("could not begin transaction: %v", err)
+	}
+	defer tx.Commit()
+
+	var fileId entities.FileId
+	if vfs.isFilesDirEntry(path) {
+		fileId = vfs.linkNameToFileId(tx, name)
+	} else {
+		fileId = vfs.parseFileId(name)
+	}
 	if fileId != 0 {
-		return vfs.getFileEntryAttr(fileId)
+		return vfs.getFileEntryAttr(tx, fileId)
 	}
 
 	tagNames := make([]string, 0, len(path))
@@ -699,12 +732,6 @@ func (vfs FuseVfs) getTaggedEntryAttr(path []string) (*fuse.Attr, fuse.Status) {
 			tagNames = append(tagNames, tagName)
 		}
 	}
-
-	tx, err := vfs.store.Begin()
-	if err != nil {
-		log.Fatalf("could not begin transaction: %v", err)
-	}
-	defer tx.Commit()
 
 	tagIds, err := vfs.tagNamesToIds(tx, tagNames)
 	if err != nil {
@@ -729,10 +756,16 @@ func (vfs FuseVfs) getQueryEntryAttr(path []string) (*fuse.Attr, fuse.Status) {
 
 	name := path[len(path)-1]
 
+	tx, err := vfs.store.Begin()
+	if err != nil {
+		log.Fatalf("could not begin transaction: %v", err)
+	}
+	defer tx.Commit()
+
 	if len(path) > 1 {
-		fileId := vfs.parseFileId(name)
+		fileId := vfs.linkNameToFileId(tx, name)
 		if fileId != 0 {
-			return vfs.getFileEntryAttr(fileId)
+			return vfs.getFileEntryAttr(tx, fileId)
 		}
 
 		return nil, fuse.ENOENT
@@ -749,12 +782,6 @@ func (vfs FuseVfs) getQueryEntryAttr(path []string) (*fuse.Attr, fuse.Status) {
 	if err != nil {
 		return nil, fuse.ENOENT
 	}
-
-	tx, err := vfs.store.Begin()
-	if err != nil {
-		log.Fatalf("could not begin transaction: %v", err)
-	}
-	defer tx.Commit()
 
 	tagNames, err := query.TagNames(expression)
 	if err != nil {
@@ -796,13 +823,7 @@ func (vfs FuseVfs) getDatabaseFileAttr() (*fuse.Attr, fuse.Status) {
 	return &fuse.Attr{Mode: fuse.S_IFLNK | 0755, Size: uint64(fileInfo.Size()), Mtime: uint64(modTime.Unix()), Mtimensec: uint32(modTime.Nanosecond())}, fuse.OK
 }
 
-func (vfs FuseVfs) getFileEntryAttr(fileId entities.FileId) (*fuse.Attr, fuse.Status) {
-	tx, err := vfs.store.Begin()
-	if err != nil {
-		log.Fatalf("could not begin transaction: %v", err)
-	}
-	defer tx.Commit()
-
+func (vfs FuseVfs) getFileEntryAttr(tx *storage.Tx, fileId entities.FileId) (*fuse.Attr, fuse.Status) {
 	file, err := vfs.store.File(tx, fileId)
 	if err != nil {
 		log.Fatalf("could not retrieve file #%v: %v", fileId, err)
@@ -964,7 +985,7 @@ func (vfs FuseVfs) readTaggedEntryLink(tx *storage.Tx, path []string) (string, f
 
 	name := path[len(path)-1]
 
-	fileId := vfs.parseFileId(name)
+	fileId := vfs.linkNameToFileId(tx, name)
 	if fileId == 0 {
 		return "", fuse.ENOENT
 	}
@@ -984,6 +1005,10 @@ func (vfs FuseVfs) readTaggedEntryLink(tx *storage.Tx, path []string) (string, f
 }
 
 func (vfs FuseVfs) getLinkName(file *entities.File) string {
+	if file.NameMap != "" {
+		return file.NameMap
+	}
+
 	extension := filepath.Ext(file.Path())
 	fileName := filepath.Base(file.Path())
 	linkName := fileName[0 : len(fileName)-len(extension)]

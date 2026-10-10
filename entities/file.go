@@ -16,9 +16,11 @@
 package entities
 
 import (
+	"fmt"
 	"github.com/oniony/TMSU/common/fingerprint"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -65,6 +67,7 @@ type File struct {
 	ModTime     time.Time
 	Size        int64
 	IsDir       bool
+	NameMap     string
 }
 
 func (file File) Path() string {
@@ -90,4 +93,54 @@ type FileTagCount struct {
 	Directory string
 	Name      string
 	TagCount  uint
+}
+
+func ValidateFileNameMap(nameMap string) error {
+	switch nameMap {
+	case "":
+		return fmt.Errorf("name map cannot be empty")
+	case ".", "..":
+		return fmt.Errorf("name map cannot be '.' or '..'") // cannot be used in the VFS
+	case "files":
+		return fmt.Errorf("name map cannot be 'files'") // used in the VFS
+	}
+
+	if len(nameMap) > 255 {
+		return fmt.Errorf("name map cannot be longer than 255 bytes") // cannot be used in the VFS
+	}
+
+	for _, ch := range nameMap {
+		switch ch {
+		case '/':
+			return fmt.Errorf("name map cannot contain '%c'", ch) // cannot be used in the VFS
+		case 0:
+			return fmt.Errorf("name map cannot contain %U", ch) // cannot be used in the VFS
+		}
+	}
+
+	// the VFS names the links to files without a name map NAME.ID.EXTENSION,
+	// or NAME.ID if the file has no extension
+	parts := strings.Split(nameMap, ".")
+	count := len(parts)
+	if (count >= 2 && isNumber(parts[count-1])) || (count >= 3 && isNumber(parts[count-2])) {
+		return fmt.Errorf("name map cannot end with '.NUMBER' or '.NUMBER.EXTENSION' as these names are used for files without a name map")
+	}
+
+	return nil
+}
+
+// unexported
+
+func isNumber(text string) bool {
+	if text == "" {
+		return false
+	}
+
+	for _, ch := range text {
+		if ch < '0' || ch > '9' {
+			return false
+		}
+	}
+
+	return true
 }

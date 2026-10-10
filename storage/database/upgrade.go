@@ -74,6 +74,13 @@ func upgrade(tx *sql.Tx) error {
 			return err
 		}
 	}
+	if version.LessThan(schemaVersion{common.Version{0, 8, 0}, 0}) {
+		log.Infof(2, "adding file name map column")
+
+		if err := addFileNameMapColumn(tx); err != nil {
+			return err
+		}
+	}
 
 	log.Infof(2, "updating schema version")
 	if err := updateSchemaVersion(tx, latestSchemaVersion); err != nil {
@@ -171,6 +178,37 @@ func recreateVersionTable(tx *sql.Tx) error {
 	}
 
 	if err := insertSchemaVersion(tx, latestSchemaVersion); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func addFileNameMapColumn(tx *sql.Tx) error {
+	// column will already exist if the schema was created by this version
+	rows, err := tx.Query(`
+SELECT count(1)
+FROM pragma_table_info('file')
+WHERE name = 'name_map'`)
+	if err != nil {
+		return err
+	}
+
+	count, err := readCount(rows)
+	rows.Close()
+	if err != nil {
+		return err
+	}
+
+	if count == 0 {
+		if _, err := tx.Exec(`
+ALTER TABLE file
+ADD COLUMN name_map TEXT`); err != nil {
+			return err
+		}
+	}
+
+	if err := createFileNameMapIndex(tx); err != nil {
 		return err
 	}
 

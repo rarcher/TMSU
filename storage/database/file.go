@@ -43,7 +43,7 @@ func FileCount(tx *Tx) (uint, error) {
 func Files(tx *Tx, sort string) (entities.Files, error) {
 	builder := NewBuilder()
 	builder.AppendSql(`
-SELECT id, directory, name, fingerprint, mod_time, size, is_dir
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
 FROM file `)
 
 	buildSort(sort, builder)
@@ -60,7 +60,7 @@ FROM file `)
 // Retrieves a specific file.
 func File(tx *Tx, id entities.FileId) (*entities.File, error) {
 	sql := `
-SELECT id, directory, name, fingerprint, mod_time, size, is_dir
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
 FROM file
 WHERE id = ?`
 
@@ -79,7 +79,7 @@ func FileByPath(tx *Tx, path string) (*entities.File, error) {
 	name := filepath.Base(path)
 
 	sql := `
-SELECT id, directory, name, fingerprint, mod_time, size, is_dir
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
 FROM file
 WHERE directory = ? AND name = ?`
 
@@ -92,10 +92,26 @@ WHERE directory = ? AND name = ?`
 	return readFile(rows)
 }
 
+// Retrieves the file with the specified name map.
+func FileByNameMap(tx *Tx, nameMap string) (*entities.File, error) {
+	sql := `
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
+FROM file
+WHERE name_map = ?`
+
+	rows, err := tx.Query(sql, nameMap)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return readFile(rows)
+}
+
 // Retrieves all files that are under the specified directory.
 func FilesByDirectory(tx *Tx, path string, pathContainsRoot bool) (entities.Files, error) {
 	sql := `
-SELECT id, directory, name, fingerprint, mod_time, size, is_dir
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
 FROM file
 WHERE directory = ? OR directory LIKE ?`
 
@@ -136,7 +152,7 @@ WHERE fingerprint = ?`
 // Retrieves the set of files with the specified fingerprint.
 func FilesByFingerprint(tx *Tx, fingerprint fingerprint.Fingerprint) (entities.Files, error) {
 	sql := `
-SELECT id, directory, name, fingerprint, mod_time, size, is_dir
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
 FROM file
 WHERE fingerprint = ?
 ORDER BY directory || '/' || name`
@@ -153,7 +169,7 @@ ORDER BY directory || '/' || name`
 // Retrieves the set of untagged files.
 func UntaggedFiles(tx *Tx) (entities.Files, error) {
 	sql := `
-SELECT id, directory, name, fingerprint, mod_time, size, is_dir
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
 FROM file
 WHERE id NOT IN (SELECT distinct(file_id)
                  FROM file_tag)`
@@ -196,7 +212,7 @@ func FilesForQuery(tx *Tx, expression query.Expression, path string, pathContain
 // Retrieves the sets of duplicate files within the database.
 func DuplicateFiles(tx *Tx) ([]entities.Files, error) {
 	sql := `
-SELECT id, directory, name, fingerprint, mod_time, size, is_dir
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
 FROM file
 WHERE fingerprint IN (SELECT fingerprint
                       FROM file
@@ -216,32 +232,24 @@ ORDER BY fingerprint, directory || '/' || name`
 	var fileSet entities.Files
 	var previousFingerprint fingerprint.Fingerprint
 
-	for rows.Next() {
-		if rows.Err() != nil {
-			return nil, err
-		}
-
-		var fileId entities.FileId
-		var directory, name, fp string
-		var modTime time.Time
-		var size int64
-		var isDir bool
-		err = rows.Scan(&fileId, &directory, &name, &fp, &modTime, &size, &isDir)
+	for {
+		file, err := readFile(rows)
 		if err != nil {
 			return nil, err
 		}
+		if file == nil {
+			break
+		}
 
-		fingerprint := fingerprint.Fingerprint(fp)
-
-		if fingerprint != previousFingerprint {
+		if file.Fingerprint != previousFingerprint {
 			if fileSet != nil {
 				fileSets = append(fileSets, fileSet)
 			}
 			fileSet = make(entities.Files, 0, 10)
-			previousFingerprint = fingerprint
+			previousFingerprint = file.Fingerprint
 		}
 
-		fileSet = append(fileSet, &entities.File{fileId, directory, name, fingerprint, modTime, size, isDir})
+		fileSet = append(fileSet, file)
 	}
 
 	// ensure last file set is added
@@ -279,7 +287,7 @@ VALUES (?, ?, ?, ?, ?, ?)`
 		panic("expected exactly one row to be affected.")
 	}
 
-	return &entities.File{entities.FileId(id), directory, name, fingerprint, modTime, size, isDir}, nil
+	return &entities.File{entities.FileId(id), directory, name, fingerprint, modTime, size, isDir, ""}, nil
 }
 
 // Updates a file in the database.
@@ -305,7 +313,59 @@ WHERE id = ?`
 		panic("expected exactly one row to be affected.")
 	}
 
-	return &entities.File{entities.FileId(fileId), directory, name, fingerprint, modTime, size, isDir}, nil
+	return File(tx, fileId) // re-read as name map is not updated here
+}
+
+// Updates the name map of a file in the database.
+func UpdateFileNameMap(tx *Tx, fileId entities.FileId, nameMap string) error {
+	sql := `
+UPDATE file
+SET name_map = ?
+WHERE id = ?`
+
+	result, err := tx.Exec(sql, nameMap, fileId)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return NoSuchFileError{fileId}
+	}
+	if rowsAffected > 1 {
+		panic("expected only one row to be affected.")
+	}
+
+	return nil
+}
+
+// Removes the name map of a file in the database.
+func DeleteFileNameMap(tx *Tx, fileId entities.FileId) error {
+	sql := `
+UPDATE file
+SET name_map = NULL
+WHERE id = ?`
+
+	result, err := tx.Exec(sql, fileId)
+	if err != nil {
+		return err
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rowsAffected == 0 {
+		return NoSuchFileError{fileId}
+	}
+	if rowsAffected > 1 {
+		panic("expected only one row to be affected.")
+	}
+
+	return nil
 }
 
 // Removes a file from the database.
@@ -367,12 +427,13 @@ func readFile(rows *sql.Rows) (*entities.File, error) {
 	var modTime time.Time
 	var size int64
 	var isDir bool
-	err := rows.Scan(&fileId, &directory, &name, &fp, &modTime, &size, &isDir)
+	var nameMap sql.NullString
+	err := rows.Scan(&fileId, &directory, &name, &fp, &modTime, &size, &isDir, &nameMap)
 	if err != nil {
 		return nil, err
 	}
 
-	return &entities.File{fileId, directory, name, fingerprint.Fingerprint(fp), modTime, size, isDir}, nil
+	return &entities.File{fileId, directory, name, fingerprint.Fingerprint(fp), modTime, size, isDir, nameMap.String}, nil
 }
 
 func readFiles(rows *sql.Rows, files entities.Files) (entities.Files, error) {
@@ -408,7 +469,7 @@ func buildQuery(expression query.Expression, path string, pathContainsRoot, expl
 	builder := NewBuilder()
 
 	builder.AppendSql(`
-SELECT id, directory, name, fingerprint, mod_time, size, is_dir
+SELECT id, directory, name, fingerprint, mod_time, size, is_dir, name_map
 FROM file
 WHERE`)
 	buildQueryBranch(expression, builder, explicitOnly, ignoreCase)

@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+# setup
+
+echo 1 >/tmp/tmsu/file1
+tmsu tag /tmp/tmsu/file1 aubergine                          >|/tmp/tmsu/stdout 2>|/tmp/tmsu/stderr
+
+# test
+
+tmsu map-name /tmp/tmsu/file1 "vegetable.7.jpg"             >>/tmp/tmsu/stdout 2>>/tmp/tmsu/stderr
+tmsu map-name /tmp/tmsu/file1 "vegetable.7"                 >>/tmp/tmsu/stdout 2>>/tmp/tmsu/stderr
+tmsu map-name /tmp/tmsu/file1 "vegetable.7b.jpg"            >>/tmp/tmsu/stdout 2>>/tmp/tmsu/stderr
+
+# verify
+
+tmsu map-name /tmp/tmsu/file1                               >>/tmp/tmsu/stdout 2>>/tmp/tmsu/stderr
+
+diff /tmp/tmsu/stderr - <<EOF
+tmsu: new tag 'aubergine'
+tmsu: /tmp/tmsu/file1: could not set name map to 'vegetable.7.jpg': name map cannot end with '.NUMBER' or '.NUMBER.EXTENSION' as these names are used for files without a name map
+tmsu: /tmp/tmsu/file1: could not set name map to 'vegetable.7': name map cannot end with '.NUMBER' or '.NUMBER.EXTENSION' as these names are used for files without a name map
+EOF
+if [[ $? -ne 0 ]]; then
+    exit 1
+fi
+
+diff /tmp/tmsu/stdout - <<EOF
+vegetable.7b.jpg
+EOF
+if [[ $? -ne 0 ]]; then
+    exit 1
+fi

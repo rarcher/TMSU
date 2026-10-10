@@ -361,6 +361,23 @@ _tmsu_cmd_init() {
     _arguments -s -w '*:file:_files' && ret=0
 }
 
+_tmsu_cmd_map-name() {
+    _arguments -s -w ''{--clear,-c}'[remove the name map]' \
+                     ''{--no-dereference,-P}'[never follow symlinks (map link itself)]' \
+                     '*:: :->items' \
+    && ret=0
+
+    case $state in
+        (items)
+            if (( ${+opt_args[--clear]} || ${+opt_args[-c]} || CURRENT == 1 ))
+            then
+                _wanted files expl 'file' _files
+            else
+                _message 'name'
+            fi
+    esac
+}
+
 _tmsu_cmd_merge() {
     _arguments -s -w ''--value'[merge values]' \
                      '*:: :-> items' \

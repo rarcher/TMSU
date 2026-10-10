@@ -137,6 +137,7 @@ v0.8.0 (in development)
   * Support for Blake2b-256 fingerprints -- thanks to [foxcpp](https://github.com/foxcpp)
   * Hidden files are no longer tagged by default when tagging recursively. To include hidden files use the `--include-hidden` option -- thanks to [foxcpp](https://github.com/foxcpp)
   * Fixes to Zsh completion -- thanks to [taiyu-len](https://github.com/taiyu-len) and [Shadoukan](https://github.com/Shadoukan)
+  * New `map-name` subcommand sets the name used for a file's symbolic links in the virtual filesystem
 
 v0.7.5
 ------

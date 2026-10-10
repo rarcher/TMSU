@@ -23,7 +23,7 @@ import (
 
 // unexported
 
-var latestSchemaVersion = schemaVersion{common.Version{0, 7, 0}, 1}
+var latestSchemaVersion = schemaVersion{common.Version{0, 8, 0}, 0}
 
 func currentSchemaVersion(tx *sql.Tx) schemaVersion {
 	sql := `
@@ -160,6 +160,7 @@ CREATE TABLE IF NOT EXISTS file (
     mod_time DATETIME NOT NULL,
     size INTEGER NOT NULL,
     is_dir BOOLEAN NOT NULL,
+    name_map TEXT,
     CONSTRAINT con_file_path UNIQUE (directory, name)
 )`
 
@@ -170,6 +171,24 @@ CREATE TABLE IF NOT EXISTS file (
 	sql = `
 CREATE INDEX IF NOT EXISTS idx_file_fingerprint
 ON file(fingerprint)`
+
+	if _, err := tx.Exec(sql); err != nil {
+		return err
+	}
+
+	if err := createFileNameMapIndex(tx); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func createFileNameMapIndex(tx *sql.Tx) error {
+	// a unique index rather than a column constraint as Sqlite cannot add a
+	// column with a UNIQUE constraint to an existing table
+	sql := `
+CREATE UNIQUE INDEX IF NOT EXISTS idx_file_name_map
+ON file(name_map)`
 
 	if _, err := tx.Exec(sql); err != nil {
 		return err

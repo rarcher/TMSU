@@ -12,9 +12,10 @@ _tmsu() {
 
     # All subcommands + aliases
     SUBCOMMANDS=( 'config' 'copy' 'cp' 'del' 'delete' 'dupes' 'files' 'fix'
-                  'help' 'imply' 'info' 'init' 'merge' 'mount' 'mv' 'query'
-                  'rename' 'repair' 'rm' 'stats' 'status' 'tag' 'tags' 'umount'
-                  'unmount' 'untag' 'untagged' 'values' 'version' 'vfs' )
+                  'help' 'imply' 'info' 'init' 'map-name' 'merge' 'mount' 'mv'
+                  'query' 'rename' 'repair' 'rm' 'stats' 'status' 'tag' 'tags'
+                  'umount' 'unmount' 'untag' 'untagged' 'values' 'version'
+                  'vfs' )
     # Subcommands that do not need an existing TMSU database
     NON_DB_SUBCOMMANDS=( 'help' 'init' 'mount' 'umount' 'unmount' 'version'
                          'vfs' )
@@ -94,24 +95,27 @@ general_subcmd_completion() {
     # Complete subcommand $1
     # $1 - subcommand to complete, str
 
-    local FIRST_NON_OPT_I args opts
+    local FIRST_NON_OPT_I args name opts
 
-    opts="opts_$1"
-    args="args_$1"
+    # Hyphens are not valid in variable names, so a subcommand such as
+    # 'map-name' uses 'opts_map_name', 'subcmd_gt_map_name', etc.
+    name="${1//-/_}"
+    opts="opts_$name"
+    args="args_$name"
     FIRST_NON_OPT_I="$(first_non_opt_i "${!opts}" "${!args}")"
 
     # There is an option with the arguments which should be completed
     if [[ "$FIRST_NON_OPT_I" -gt "$COMP_CWORD" ]]; then
-        subcmd_gt_$1
+        subcmd_gt_$name
     fi
 
     # The previous word is either a completed option or subcommand
     if [[ "$FIRST_NON_OPT_I" -eq "$COMP_CWORD" ]]; then
-        subcmd_eq_$1
+        subcmd_eq_$name
     fi
 
     if [[ "$FIRST_NON_OPT_I" -lt "$COMP_CWORD" ]]; then
-        subcmd_lt_$1
+        subcmd_lt_$name
     fi
 }
 
@@ -512,6 +516,22 @@ subcmd_eq_init() {
 }
 subcmd_lt_init() {
     :
+}
+
+opts_map_name='-c --clear -P --no-dereference'
+args_map_name='0 0 0 0'
+subcmd_gt_map_name() {
+    :
+}
+subcmd_eq_map_name() {
+    completion_generator "$(mline "$opts_map_name")" '-f'
+}
+subcmd_lt_map_name() {
+    # With '--clear' every argument is a file, otherwise the second is a name
+    local words=" ${COMP_WORDS[@]:$SUBCMD_I+1:$COMP_CWORD-$SUBCMD_I-1} "
+    if [[ "$words" =~ " -c " || "$words" =~ " --clear " ]]; then
+        completion_generator '' '-f'
+    fi
 }
 
 opts_merge="$opts_delete"

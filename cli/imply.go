@@ -36,7 +36,9 @@ Tag implications are applied at time of file query (not at time of tag applicati
 
 By default the 'tag' subcommand will not explicitly apply tags that are already implied by the implication rules.
 
-The 'tags' subcommand can be used to identify which tags applied to a file are implied.`,
+The 'tags' subcommand can be used to identify which tags applied to a file are implied.
+
+Within the virtual filesystem a tag that implies other tags is only listed within the directories of the tags it implies, e.g. with the implication 'mp3 -> music' the 'mp3' directory is listed within 'music' but not alongside it.`,
 	Examples: []string{`$ tmsu imply mp3 music`,
 		`$ tmsu imply
 mp3 -> music`,

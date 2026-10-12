@@ -619,8 +619,17 @@ func (vfs FuseVfs) tagDirectories(tx *storage.Tx) ([]fuse.DirEntry, fuse.Status)
 		log.Fatalf("Could not retrieve tags: %v", err)
 	}
 
+	implications, err := vfs.store.Implications(tx)
+	if err != nil {
+		log.Fatalf("could not retrieve implications: %v", err)
+	}
+
 	entries := make([]fuse.DirEntry, 0, len(tags))
 	for _, tag := range tags {
+		if !isTagListed(tag.Name, []string{}, implications) {
+			continue
+		}
+
 		tagName := escape(tag.Name)
 
 		if tagName == filesDir {
@@ -885,8 +894,19 @@ func (vfs FuseVfs) openTaggedEntryDir(tx *storage.Tx, path []string) ([]fuse.Dir
 		log.Fatalf("could not retrieve further tags: %v", err)
 	}
 
+	implications, err := vfs.store.Implications(tx)
+	if err != nil {
+		log.Fatalf("could not retrieve implications: %v", err)
+	}
+
+	pathTagNames := pathToTagNames(path, implications)
+
 	entries := make([]fuse.DirEntry, 0, len(files)+len(furtherTagNames))
 	for _, tagName := range furtherTagNames {
+		if !isTagListed(tagName, pathTagNames, implications) {
+			continue
+		}
+
 		tagName = escape(tagName)
 
 		if tagName == filesDir {
@@ -1147,6 +1167,72 @@ func pathToExpression(path []string) query.Expression {
 	return expression
 }
 
+// Retrieves the names of the tags that every file within the tag directory at path has, either explicitly via the
+// path or by implication.
+func pathToTagNames(path []string, implications entities.Implications) []string {
+	tagNames := make([]string, 0, len(path))
+	valueNames := make([]string, 0, len(path))
+
+	for _, element := range path {
+		if element[0] == '=' {
+			if len(valueNames) > 0 {
+				valueNames[len(valueNames)-1] = unescape(element[1:])
+			}
+
+			continue
+		}
+
+		tagNames = append(tagNames, unescape(element))
+		valueNames = append(valueNames, "")
+	}
+
+	// WARN: this cannot use 'range' as tagNames is expanded within the loop
+	for index := 0; index < len(tagNames); index++ {
+		for _, implication := range implications {
+			if implication.ImplyingTag.Name != tagNames[index] {
+				continue
+			}
+
+			if implication.ImplyingValue.Id != 0 && implication.ImplyingValue.Name != valueNames[index] {
+				continue
+			}
+
+			impliedTagName := implication.ImpliedTag.Name
+			impliedValueName := implication.ImpliedValue.Name
+
+			if containsTagValueName(tagNames, valueNames, impliedTagName, impliedValueName) {
+				continue
+			}
+
+			tagNames = append(tagNames, impliedTagName)
+			valueNames = append(valueNames, impliedValueName)
+		}
+	}
+
+	return tagNames
+}
+
+// Determines whether the tag should be listed within a tag directory whose files have the tags pathTagNames. A tag
+// that implies other tags is only listed within the directories of the tags it implies, as every file with the tag
+// also has the implied tags.
+func isTagListed(tagName string, pathTagNames []string, implications entities.Implications) bool {
+	for _, implication := range implications {
+		if implication.ImplyingTag.Name != tagName || implication.ImplyingValue.Id != 0 {
+			continue
+		}
+
+		if escape(implication.ImpliedTag.Name) == filesDir {
+			continue // never listed in the VFS
+		}
+
+		if !containsString(pathTagNames, implication.ImpliedTag.Name) {
+			return false
+		}
+	}
+
+	return true
+}
+
 func fileIdToAscii(fileId entities.FileId) string {
 	return strconv.FormatUint(uint64(fileId), 10)
 }
@@ -1169,6 +1255,16 @@ func containsTag(tags entities.Tags, tagName string) bool {
 func containsString(values []string, value string) bool {
 	for _, v := range values {
 		if v == value {
+			return true
+		}
+	}
+
+	return false
+}
+
+func containsTagValueName(tagNames []string, valueNames []string, tagName string, valueName string) bool {
+	for index := range tagNames {
+		if tagNames[index] == tagName && valueNames[index] == valueName {
 			return true
 		}
 	}
